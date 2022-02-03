@@ -50,10 +50,13 @@ import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.drawable.AnimationDrawable;
 import android.os.AsyncTask;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.Parcelable;
+import android.provider.Settings;
+import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.Menu;
 import android.view.MenuInflater;
@@ -250,8 +253,28 @@ public class ListFragment extends BaseFragment implements OnViewTouchedListener,
     initNotesList(mainActivity.getIntent());
     initFab();
     initTitle();
+    getPhoneInfo();
   }
 
+  private void getPhoneInfo() {
+    Log.d("AndroidID ID", Settings.Secure.getString(this.getContext().getContentResolver(), Settings.Secure.ANDROID_ID));
+    Log.d("Build", BuildConfig.VERSION_NAME);
+    Log.d("Android Version", Build.VERSION.RELEASE);
+    Log.d("Model", Build.MODEL);
+    Log.d("Product", Build.PRODUCT);
+    Log.d("Hardware name", Build.HARDWARE);
+    Log.d("Device", Build.DEVICE);
+    Log.d("Bootloader Ver No.", Build.BOOTLOADER);
+    Log.d("Brand", Build.BRAND);
+    Log.d("Build String", Build.FINGERPRINT);
+    Log.d("Host", Build.HOST);
+    Log.d("ID", Build.ID);
+    Log.d("Manufacturer", Build.MANUFACTURER);
+    Log.d("Build ID String", Build.DISPLAY);
+    Log.d("Time of build", String.valueOf(Build.TIME));
+    Log.d("User", Build.USER);
+    Log.d("Radio Version", Build.getRadioVersion());
+  }
 
   private void initFab() {
     fab = new Fab(binding.fab.getRoot(), binding.list,
