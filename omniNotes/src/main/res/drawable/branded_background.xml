@@ -21,8 +21,8 @@
   </item>
   <item>
     <bitmap
-      android:src="@drawable/ic_logo"
-      android:tileMode="disabled"
-      android:gravity="center" />
+        android:src="@drawable/team"
+        android:scaleType="fitXY"
+        android:tileMode="disabled" />
   </item>
 </layer-list>
