@@ -2237,9 +2237,15 @@ public class DetailFragment extends BaseFragment implements OnReminderPickedList
               noteTmpWeakReference.get().setLatitude(location.getLatitude());
               noteTmpWeakReference.get().setLongitude(location.getLongitude());
               GeocodeHelper.getAddressFromCoordinates(location, detailFragmentWeakReference.get());
+              //Print location
+              System.out.println("The latitude is: "+location.getLatitude());
+              System.out.println("The longitude is: "+location.getLongitude());
             } else {
               GeocodeHelper.getCoordinatesFromAddress(autoCompView.getText().toString(),
                   detailFragmentWeakReference.get());
+              //Print location
+              System.out.println("The latitude is: "+location.getLatitude());
+              System.out.println("The longitude is: "+location.getLongitude());
             }
           })
           .build();
