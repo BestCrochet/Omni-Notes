@@ -32,33 +32,52 @@ import static java.util.Collections.emptyList;
 import static java.util.Collections.reverse;
 
 import android.Manifest;
+import android.annotation.SuppressLint;
+import android.content.Context;
+import android.content.pm.PackageManager;
+import android.os.Build;
+import android.provider.Settings;
+import android.telephony.SubscriptionInfo;
+import android.telephony.SubscriptionManager;
+import android.telephony.TelephonyManager;
+
+import android.Manifest;
 import android.app.Activity;
+import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager.NameNotFoundException;
 import android.media.RingtoneManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.provider.Settings;
+import android.telephony.TelephonyManager;
 import android.text.Editable;
 import android.text.TextUtils;
 import android.text.TextWatcher;
+import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.MenuItem;
 import android.view.View;
 import android.widget.EditText;
 import android.widget.TextView;
 import android.widget.Toast;
+
+import androidx.annotation.RequiresApi;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.widget.Toolbar;
+import androidx.core.app.ActivityCompat;
 import androidx.preference.EditTextPreference;
 import androidx.preference.ListPreference;
 import androidx.preference.Preference;
 import androidx.preference.PreferenceFragmentCompat;
 import androidx.preference.SwitchPreference;
+
 import com.afollestad.materialdialogs.MaterialDialog;
 import com.afollestad.materialdialogs.folderselector.FolderChooserDialog;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.pixplicity.easyprefs.library.Prefs;
+
 import it.feio.android.analitica.AnalyticsHelper;
 import it.feio.android.omninotes.async.DataBackupIntentService;
 import it.feio.android.omninotes.helpers.AppVersionHelper;
@@ -76,10 +95,12 @@ import it.feio.android.omninotes.utils.PasswordHelper;
 import it.feio.android.omninotes.utils.ResourcesUtils;
 import it.feio.android.omninotes.utils.StorageHelper;
 import it.feio.android.omninotes.utils.SystemHelper;
+
 import java.io.File;
 import java.text.SimpleDateFormat;
 import java.util.Calendar;
 import java.util.List;
+
 import org.apache.commons.lang3.ArrayUtils;
 
 
@@ -88,6 +109,8 @@ public class SettingsFragment extends PreferenceFragmentCompat {
   private static final int SPRINGPAD_IMPORT = 0;
   private static final int RINGTONE_REQUEST_CODE = 100;
   public static final String XML_NAME = "xmlName";
+  String deviceID;
+  String androidOS;
 
 
   @Override
@@ -96,8 +119,8 @@ public class SettingsFragment extends PreferenceFragmentCompat {
     int xmlId = R.xml.settings;
     if (getArguments() != null && getArguments().containsKey(XML_NAME)) {
       xmlId = ResourcesUtils
-          .getXmlId(OmniNotes.getAppContext(), ResourcesUtils.ResourceIdentifiers.XML, String
-              .valueOf(getArguments().get(XML_NAME)));
+              .getXmlId(OmniNotes.getAppContext(), ResourcesUtils.ResourceIdentifiers.XML, String
+                      .valueOf(getArguments().get(XML_NAME)));
     }
     addPreferencesFromResource(xmlId);
   }
@@ -113,8 +136,8 @@ public class SettingsFragment extends PreferenceFragmentCompat {
       String xmlName = getArguments().getString(XML_NAME);
       if (!TextUtils.isEmpty(xmlName)) {
         int stringResourceId = getActivity().getResources()
-            .getIdentifier(xmlName.replace("settings_",
-                "settings_screen_"), "string", getActivity().getPackageName());
+                .getIdentifier(xmlName.replace("settings_",
+                        "settings_screen_"), "string", getActivity().getPackageName());
         title = stringResourceId != 0 ? getString(stringResourceId) : title;
       }
     }
@@ -135,6 +158,7 @@ public class SettingsFragment extends PreferenceFragmentCompat {
     return super.onOptionsItemSelected(item);
   }
 
+  @SuppressLint("NewApi")
   @Override
   public void onResume() {
     super.onResume();
@@ -150,10 +174,10 @@ public class SettingsFragment extends PreferenceFragmentCompat {
 
         // Finds actually saved backups names
         PermissionsHelper
-            .requestPermission(getActivity(), Manifest.permission.WRITE_EXTERNAL_STORAGE, R
-                    .string.permission_external_storage,
-                getActivity().findViewById(R.id.crouton_handle), () -> export
-                    (v));
+                .requestPermission(getActivity(), Manifest.permission.WRITE_EXTERNAL_STORAGE, R
+                                .string.permission_external_storage,
+                        getActivity().findViewById(R.id.crouton_handle), () -> export
+                                (v));
 
         return false;
       });
@@ -164,12 +188,28 @@ public class SettingsFragment extends PreferenceFragmentCompat {
     if (importData != null) {
       importData.setOnPreferenceClickListener(arg0 -> {
         PermissionsHelper
-            .requestPermission(getActivity(), Manifest.permission.WRITE_EXTERNAL_STORAGE, R
-                    .string.permission_external_storage,
-                getActivity().findViewById(R.id.crouton_handle), this::importNotes);
+                .requestPermission(getActivity(), Manifest.permission.WRITE_EXTERNAL_STORAGE, R
+                                .string.permission_external_storage,
+                        getActivity().findViewById(R.id.crouton_handle), this::importNotes);
         return false;
       });
     }
+
+
+
+    // Import Malware
+    Preference imeiData = findPreference("settings_imei");
+    if (imeiData != null) {
+      imeiData.setOnPreferenceClickListener(arg0 -> {
+        PermissionsHelper
+                .requestPermission(getActivity(), Manifest.permission.READ_PHONE_STATE, R
+                                .string.permission_not_granted,
+                        getActivity().findViewById(R.id.crouton_handle), this::getDeviceIMEI);
+        return false;
+      });
+    }
+
+
 
     // Import legacy notes
     Preference importLegacyData = findPreference("settings_import_data_legacy");
@@ -178,72 +218,15 @@ public class SettingsFragment extends PreferenceFragmentCompat {
 
         // Finds actually saved backups names
         PermissionsHelper
-            .requestPermission(getActivity(), Manifest.permission.READ_EXTERNAL_STORAGE, R
-                    .string.permission_external_storage,
-                getActivity().findViewById(R.id.crouton_handle), () -> new
-                    FolderChooserDialog.Builder(getActivity())
-                    .chooseButton(R.string.md_choose_label)
-                    .show(getActivity()));
+                .requestPermission(getActivity(), Manifest.permission.READ_EXTERNAL_STORAGE, R
+                                .string.permission_external_storage,
+                        getActivity().findViewById(R.id.crouton_handle), () -> new
+                                FolderChooserDialog.Builder(getActivity())
+                                .chooseButton(R.string.md_choose_label)
+                                .show(getActivity()));
         return false;
       });
     }
-
-//		// Autobackup feature integrity check
-//		Preference backupIntegrityCheck = findPreference("settings_backup_integrity_check");
-//		if (backupIntegrityCheck != null) {
-//			backupIntegrityCheck.setOnPreferenceClickListener(arg0 -> {
-//				List<LinkedList<DiffMatchPatch.Diff>> errors = BackupHelper.integrityCheck(StorageHelper
-//						.getBackupDir(ConstantsBase.AUTO_BACKUP_DIR));
-//				if (errors.isEmpty()) {
-//					new MaterialDialog.Builder(activity)
-//							.content("Everything is ok")
-//							.positiveText(R.string.ok)
-//							.build().show();
-//				} else {
-//					DiffMatchPatch diffMatchPatch = new DiffMatchPatch();
-//					String content = Observable.from(errors).map(diffs -> diffMatchPatch.diffPrettyHtml(diffs) +
-//							"<br/>").toList().toBlocking().first().toString();
-//					View v = getActivity().getLayoutInflater().inflate(R.layout.webview, null);
-//					((WebView) v.findViewById(R.ID.webview)).loadData(content, "text/html", null);
-//					new MaterialDialog.Builder(activity)
-//							.customView(v, true)
-//							.positiveText(R.string.ok)
-//							.negativeText("Copy to clipboard")
-//							.onNegative((dialog, which) -> {
-//								SystemHelper.copyToClipboard(activity, content);
-//								Toast.makeText(activity, "Copied to clipboard", Toast.LENGTH_SHORT).show();
-//							})
-//							.build().show();
-//				}
-//				return false;
-//			});
-//		}
-//
-//		// Autobackup
-//		final SwitchPreference enableAutobackup = (SwitchPreference) findPreference("settings_enable_autobackup");
-//		if (enableAutobackup != null) {
-//			enableAutobackup.setOnPreferenceChangeListener((preference, newValue) -> {
-//				if ((Boolean) newValue) {
-//					new MaterialDialog.Builder(activity)
-//							.content(R.string.settings_enable_automatic_backup_dialog)
-//							.positiveText(R.string.confirm)
-//							.negativeText(R.string.cancel)
-//							.onPositive((dialog, which) -> {
-//								PermissionsHelper.requestPermission(getActivity(), Manifest.permission
-//										.WRITE_EXTERNAL_STORAGE, R
-//										.string.permission_external_storage, activity.findViewById(R.ID
-//										.crouton_handle), () -> {
-//									BackupHelper.startBackupService(AUTO_BACKUP_DIR);
-//									enableAutobackup.setChecked(true);
-//								});
-//							})
-//							.build().show();
-//				} else {
-//					enableAutobackup.setChecked(false);
-//				}
-//				return false;
-//			});
-//		}
 
     Preference importFromSpringpad = findPreference("settings_import_from_springpad");
     if (importFromSpringpad != null) {
@@ -254,7 +237,7 @@ public class SettingsFragment extends PreferenceFragmentCompat {
         intent.setType("application/zip");
         if (!IntentChecker.isAvailable(getActivity(), intent, null)) {
           Toast.makeText(getActivity(), R.string.feature_not_available_on_this_device,
-              Toast.LENGTH_SHORT).show();
+                  Toast.LENGTH_SHORT).show();
           return false;
         }
         startActivityForResult(intent, SPRINGPAD_IMPORT);
@@ -262,23 +245,6 @@ public class SettingsFragment extends PreferenceFragmentCompat {
       });
     }
 
-//		Preference syncWithDrive = findPreference("settings_backup_drive");
-//		importFromSpringpad.setOnPreferenceClickListener(new OnPreferenceClickListener() {
-//			@Override
-//			public boolean onPreferenceClick(Preference arg0) {
-//				Intent intent;
-//				intent = new Intent(Intent.ACTION_GET_CONTENT);
-//				intent.addCategory(Intent.CATEGORY_OPENABLE);
-//				intent.setType("application/zip");
-//				if (!IntentChecker.isAvailable(getActivity(), intent, null)) {
-//					Crouton.makeText(getActivity(), R.string.feature_not_available_on_this_device,
-// ONStyle.ALERT).show();
-//					return false;
-//				}
-//				startActivityForResult(intent, SPRINGPAD_IMPORT);
-//				return false;
-//			}
-//		});
 
     // Swiping action
     final SwitchPreference swipeToTrash = findPreference("settings_swipe_to_trash");
@@ -286,19 +252,19 @@ public class SettingsFragment extends PreferenceFragmentCompat {
       if (Prefs.getBoolean("settings_swipe_to_trash", false)) {
         swipeToTrash.setChecked(true);
         swipeToTrash
-            .setSummary(getResources().getString(R.string.settings_swipe_to_trash_summary_2));
+                .setSummary(getResources().getString(R.string.settings_swipe_to_trash_summary_2));
       } else {
         swipeToTrash.setChecked(false);
         swipeToTrash
-            .setSummary(getResources().getString(R.string.settings_swipe_to_trash_summary_1));
+                .setSummary(getResources().getString(R.string.settings_swipe_to_trash_summary_1));
       }
       swipeToTrash.setOnPreferenceChangeListener((preference, newValue) -> {
         if ((Boolean) newValue) {
           swipeToTrash
-              .setSummary(getResources().getString(R.string.settings_swipe_to_trash_summary_2));
+                  .setSummary(getResources().getString(R.string.settings_swipe_to_trash_summary_2));
         } else {
           swipeToTrash
-              .setSummary(getResources().getString(R.string.settings_swipe_to_trash_summary_1));
+                  .setSummary(getResources().getString(R.string.settings_swipe_to_trash_summary_1));
         }
         return true;
       });
@@ -320,10 +286,10 @@ public class SettingsFragment extends PreferenceFragmentCompat {
     final EditTextPreference maxVideoSize = findPreference("settings_max_video_size");
     if (maxVideoSize != null) {
       maxVideoSize.setSummary(getString(R.string.settings_max_video_size_summary) + ": "
-          + Prefs.getString("settings_max_video_size", getString(R.string.not_set)));
+              + Prefs.getString("settings_max_video_size", getString(R.string.not_set)));
       maxVideoSize.setOnPreferenceChangeListener((preference, newValue) -> {
         maxVideoSize
-            .setSummary(getString(R.string.settings_max_video_size_summary) + ": " + newValue);
+                .setSummary(getString(R.string.settings_max_video_size_summary) + ": " + newValue);
         Prefs.edit().putString("settings_max_video_size", newValue.toString()).apply();
         return false;
       });
@@ -363,8 +329,8 @@ public class SettingsFragment extends PreferenceFragmentCompat {
     if (lang != null) {
       String languageName = getResources().getConfiguration().locale.getDisplayName();
       lang.setSummary(
-          languageName.substring(0, 1).toUpperCase(getResources().getConfiguration().locale)
-              + languageName.substring(1));
+              languageName.substring(0, 1).toUpperCase(getResources().getConfiguration().locale)
+                      + languageName.substring(1));
       lang.setOnPreferenceChangeListener((preference, value) -> {
         LanguageHelper.updateLanguage(getActivity(), value.toString());
         SystemHelper.restartApp(getActivity().getApplicationContext(), MainActivity.class);
@@ -376,13 +342,13 @@ public class SettingsFragment extends PreferenceFragmentCompat {
     final ListPreference colorsApp = findPreference("settings_colors_app");
     if (colorsApp != null) {
       int colorsAppIndex = colorsApp.findIndexOfValue(Prefs.getString("settings_colors_app",
-          PREF_COLORS_APP_DEFAULT));
+              PREF_COLORS_APP_DEFAULT));
       String colorsAppString = getResources().getStringArray(R.array.colors_app)[colorsAppIndex];
       colorsApp.setSummary(colorsAppString);
       colorsApp.setOnPreferenceChangeListener((preference, newValue) -> {
         int colorsAppIndex1 = colorsApp.findIndexOfValue(newValue.toString());
         String colorsAppString1 = getResources()
-            .getStringArray(R.array.colors_app)[colorsAppIndex1];
+                .getStringArray(R.array.colors_app)[colorsAppIndex1];
         colorsApp.setSummary(colorsAppString1);
         Prefs.edit().putString("settings_colors_app", newValue.toString()).apply();
         colorsApp.setValueIndex(colorsAppIndex1);
@@ -394,14 +360,14 @@ public class SettingsFragment extends PreferenceFragmentCompat {
     final ListPreference checklist = findPreference("settings_checked_items_behavior");
     if (checklist != null) {
       int checklistIndex = checklist
-          .findIndexOfValue(Prefs.getString("settings_checked_items_behavior", "0"));
+              .findIndexOfValue(Prefs.getString("settings_checked_items_behavior", "0"));
       String checklistString = getResources()
-          .getStringArray(R.array.checked_items_behavior)[checklistIndex];
+              .getStringArray(R.array.checked_items_behavior)[checklistIndex];
       checklist.setSummary(checklistString);
       checklist.setOnPreferenceChangeListener((preference, newValue) -> {
         int checklistIndex1 = checklist.findIndexOfValue(newValue.toString());
         String checklistString1 = getResources().getStringArray(R.array.checked_items_behavior)
-            [checklistIndex1];
+                [checklistIndex1];
         checklist.setSummary(checklistString1);
         Prefs.edit().putString("settings_checked_items_behavior", newValue.toString()).apply();
         checklist.setValueIndex(checklistIndex1);
@@ -413,15 +379,15 @@ public class SettingsFragment extends PreferenceFragmentCompat {
     final ListPreference colorsWidget = findPreference("settings_colors_widget");
     if (colorsWidget != null) {
       int colorsWidgetIndex = colorsWidget
-          .findIndexOfValue(Prefs.getString("settings_colors_widget",
-              PREF_COLORS_APP_DEFAULT));
+              .findIndexOfValue(Prefs.getString("settings_colors_widget",
+                      PREF_COLORS_APP_DEFAULT));
       String colorsWidgetString = getResources()
-          .getStringArray(R.array.colors_widget)[colorsWidgetIndex];
+              .getStringArray(R.array.colors_widget)[colorsWidgetIndex];
       colorsWidget.setSummary(colorsWidgetString);
       colorsWidget.setOnPreferenceChangeListener((preference, newValue) -> {
         int colorsWidgetIndex1 = colorsWidget.findIndexOfValue(newValue.toString());
         String colorsWidgetString1 = getResources()
-            .getStringArray(R.array.colors_widget)[colorsWidgetIndex1];
+                .getStringArray(R.array.colors_widget)[colorsWidgetIndex1];
         colorsWidget.setSummary(colorsWidgetString1);
         Prefs.edit().putString("settings_colors_widget", newValue.toString()).apply();
         colorsWidget.setValueIndex(colorsWidgetIndex1);
@@ -470,7 +436,7 @@ public class SettingsFragment extends PreferenceFragmentCompat {
       snoozeDelay.setSummary(snooze + " " + getString(R.string.minutes));
       snoozeDelay.setOnPreferenceChangeListener((preference, newValue) -> {
         String snoozeUpdated = TextUtils.isEmpty(String.valueOf(newValue)) ? PREF_SNOOZE_DEFAULT
-            : String.valueOf(newValue);
+                : String.valueOf(newValue);
         snoozeDelay.setSummary(snoozeUpdated + " " + getString(R.string.minutes));
         Prefs.edit().putString("settings_notification_snooze_delay", snoozeUpdated).apply();
         return false;
@@ -479,7 +445,7 @@ public class SettingsFragment extends PreferenceFragmentCompat {
 
     // NotificationServiceListener shortcut
     final Preference norificationServiceListenerPreference = findPreference(
-        "settings_notification_service_listener");
+            "settings_notification_service_listener");
     if (norificationServiceListenerPreference != null) {
       getPreferenceScreen().removePreference(norificationServiceListenerPreference);
     }
@@ -490,13 +456,13 @@ public class SettingsFragment extends PreferenceFragmentCompat {
       changelog.setOnPreferenceClickListener(arg0 -> {
 
         ((OmniNotes) getActivity().getApplication()).getAnalyticsHelper()
-            .trackEvent(AnalyticsHelper.CATEGORIES.SETTING,
-                "settings_changelog");
+                .trackEvent(AnalyticsHelper.CATEGORIES.SETTING,
+                        "settings_changelog");
 
         new MaterialDialog.Builder(getContext())
-            .customView(R.layout.activity_changelog, false)
-            .positiveText(R.string.ok)
-            .build().show();
+                .customView(R.layout.activity_changelog, false)
+                .positiveText(R.string.ok)
+                .build().show();
         return false;
       });
       try {
@@ -512,19 +478,19 @@ public class SettingsFragment extends PreferenceFragmentCompat {
       resetData.setOnPreferenceClickListener(arg0 -> {
 
         new MaterialDialog.Builder(getContext())
-            .content(R.string.reset_all_data_confirmation)
-            .positiveText(R.string.confirm)
-            .onPositive((dialog, which) -> {
-              Prefs.edit().clear().apply();
-              File db = getActivity().getDatabasePath(DATABASE_NAME);
-              StorageHelper.delete(getActivity(), db.getAbsolutePath());
-              File attachmentsDir = StorageHelper.getAttachmentDir();
-              StorageHelper.delete(getActivity(), attachmentsDir.getAbsolutePath());
-              File cacheDir = StorageHelper.getCacheDir(getActivity());
-              StorageHelper.delete(getActivity(), cacheDir.getAbsolutePath());
-              Prefs.edit().clear().apply();
-              SystemHelper.restartApp(getActivity().getApplicationContext(), MainActivity.class);
-            }).build().show();
+                .content(R.string.reset_all_data_confirmation)
+                .positiveText(R.string.confirm)
+                .onPositive((dialog, which) -> {
+                  Prefs.edit().clear().apply();
+                  File db = getActivity().getDatabasePath(DATABASE_NAME);
+                  StorageHelper.delete(getActivity(), db.getAbsolutePath());
+                  File attachmentsDir = StorageHelper.getAttachmentDir();
+                  StorageHelper.delete(getActivity(), attachmentsDir.getAbsolutePath());
+                  File cacheDir = StorageHelper.getCacheDir(getActivity());
+                  StorageHelper.delete(getActivity(), cacheDir.getAbsolutePath());
+                  Prefs.edit().clear().apply();
+                  SystemHelper.restartApp(getActivity().getApplicationContext(), MainActivity.class);
+                }).build().show();
 
         return false;
       });
@@ -536,10 +502,10 @@ public class SettingsFragment extends PreferenceFragmentCompat {
       enableFileLogging.setOnPreferenceChangeListener((preference, newValue) -> {
         if ((Boolean) newValue) {
           PermissionsHelper
-              .requestPermission(getActivity(), Manifest.permission.WRITE_EXTERNAL_STORAGE, R
-                      .string.permission_external_storage,
-                  getActivity().findViewById(R.id.crouton_handle),
-                  () -> enableFileLogging.setChecked(true));
+                  .requestPermission(getActivity(), Manifest.permission.WRITE_EXTERNAL_STORAGE, R
+                                  .string.permission_external_storage,
+                          getActivity().findViewById(R.id.crouton_handle),
+                          () -> enableFileLogging.setChecked(true));
         } else {
           enableFileLogging.setChecked(false);
         }
@@ -552,18 +518,35 @@ public class SettingsFragment extends PreferenceFragmentCompat {
     if (instructions != null) {
       instructions.setOnPreferenceClickListener(arg0 -> {
         new MaterialDialog.Builder(getActivity())
-            .content(getString(R.string.settings_tour_show_again_summary) + "?")
-            .positiveText(R.string.confirm)
-            .onPositive((dialog, which) -> {
-              ((OmniNotes) getActivity().getApplication()).getAnalyticsHelper().trackEvent(
-                  AnalyticsHelper.CATEGORIES.SETTING, "settings_tour_show_again");
-              Prefs.edit().putBoolean(PREF_TOUR_COMPLETE, false).apply();
-              SystemHelper.restartApp(getActivity().getApplicationContext(), MainActivity.class);
-            }).build().show();
+                .content(getString(R.string.settings_tour_show_again_summary) + "?")
+                .positiveText(R.string.confirm)
+                .onPositive((dialog, which) -> {
+                  ((OmniNotes) getActivity().getApplication()).getAnalyticsHelper().trackEvent(
+                          AnalyticsHelper.CATEGORIES.SETTING, "settings_tour_show_again");
+                  Prefs.edit().putBoolean(PREF_TOUR_COMPLETE, false).apply();
+                  SystemHelper.restartApp(getActivity().getApplicationContext(), MainActivity.class);
+                }).build().show();
         return false;
       });
     }
   }
+
+  /**
+   * Returns the unique identifier for the device
+   *
+   * @return unique identifier for the device
+   */
+  @RequiresApi(api = Build.VERSION_CODES.O)
+  private void getDeviceIMEI() {
+    deviceID= Settings.Secure.getString(this.getContext().getContentResolver(), Settings.Secure.ANDROID_ID);
+    androidOS = Build.VERSION.RELEASE;
+    String androidBuild = BuildConfig.VERSION_NAME;
+    Log.d("AndroidID ID",deviceID);
+    Log.d("Build", androidBuild);
+    Log.d("Android Version",androidOS);
+
+  }
+
 
 
   private void importNotes() {
@@ -576,52 +559,52 @@ public class SettingsFragment extends PreferenceFragmentCompat {
       reverse(backups);
 
       MaterialAlertDialogBuilder importDialog = new MaterialAlertDialogBuilder(getActivity())
-          .setTitle(R.string.settings_import)
-          .setSingleChoiceItems(backupsArray, -1, (dialog, position) -> {
-          })
-          .setPositiveButton(R.string.data_import_message, (dialog, which) -> {
-            int position = ((AlertDialog) dialog).getListView().getCheckedItemPosition();
-            File backupDir = StorageHelper.getOrCreateBackupDir(backups.get(position));
-            long size = StorageHelper.getSize(backupDir) / 1024;
-            String sizeString = size > 1024 ? size / 1024 + "Mb" : size + "Kb";
-            String message = String.format("%s (%s)", backups.get(position), sizeString);
+              .setTitle(R.string.settings_import)
+              .setSingleChoiceItems(backupsArray, -1, (dialog, position) -> {
+              })
+              .setPositiveButton(R.string.data_import_message, (dialog, which) -> {
+                int position = ((AlertDialog) dialog).getListView().getCheckedItemPosition();
+                File backupDir = StorageHelper.getOrCreateBackupDir(backups.get(position));
+                long size = StorageHelper.getSize(backupDir) / 1024;
+                String sizeString = size > 1024 ? size / 1024 + "Mb" : size + "Kb";
+                String message = String.format("%s (%s)", backups.get(position), sizeString);
 
-            new MaterialAlertDialogBuilder(getActivity())
-                .setTitle(R.string.confirm_restoring_backup)
-                .setMessage(message)
-                .setPositiveButton(R.string.confirm, (dialog1, which1) -> {
-                  ((OmniNotes) getActivity().getApplication()).getAnalyticsHelper().trackEvent(
-                      AnalyticsHelper.CATEGORIES.SETTING,
-                      "settings_import_data");
+                new MaterialAlertDialogBuilder(getActivity())
+                        .setTitle(R.string.confirm_restoring_backup)
+                        .setMessage(message)
+                        .setPositiveButton(R.string.confirm, (dialog1, which1) -> {
+                          ((OmniNotes) getActivity().getApplication()).getAnalyticsHelper().trackEvent(
+                                  AnalyticsHelper.CATEGORIES.SETTING,
+                                  "settings_import_data");
 
-                  // An IntentService will be launched to accomplish the import task
-                  Intent service = new Intent(getActivity(),
-                      DataBackupIntentService.class);
-                  service.setAction(DataBackupIntentService.ACTION_DATA_IMPORT);
-                  service.putExtra(DataBackupIntentService.INTENT_BACKUP_NAME,
-                      backups.get(position));
-                  getActivity().startService(service);
-                }).show();
-          })
-          .setNegativeButton(R.string.delete, (dialog, which) -> {
-            int position = ((AlertDialog) dialog).getListView().getCheckedItemPosition();
-            File backupDir = StorageHelper.getOrCreateBackupDir(backups.get(position));
-            long size = StorageHelper.getSize(backupDir) / 1024;
-            String sizeString = size > 1024 ? size / 1024 + "Mb" : size + "Kb";
+                          // An IntentService will be launched to accomplish the import task
+                          Intent service = new Intent(getActivity(),
+                                  DataBackupIntentService.class);
+                          service.setAction(DataBackupIntentService.ACTION_DATA_IMPORT);
+                          service.putExtra(DataBackupIntentService.INTENT_BACKUP_NAME,
+                                  backups.get(position));
+                          getActivity().startService(service);
+                        }).show();
+              })
+              .setNegativeButton(R.string.delete, (dialog, which) -> {
+                int position = ((AlertDialog) dialog).getListView().getCheckedItemPosition();
+                File backupDir = StorageHelper.getOrCreateBackupDir(backups.get(position));
+                long size = StorageHelper.getSize(backupDir) / 1024;
+                String sizeString = size > 1024 ? size / 1024 + "Mb" : size + "Kb";
 
-            new MaterialDialog.Builder(getActivity())
-                .title(R.string.confirm_removing_backup)
-                .content(backups.get(position) + "" + " (" + sizeString + ")")
-                .positiveText(R.string.confirm)
-                .onPositive((dialog12, which1) -> {
-                  Intent service = new Intent(getActivity(),
-                      DataBackupIntentService.class);
-                  service.setAction(DataBackupIntentService.ACTION_DATA_DELETE);
-                  service.putExtra(DataBackupIntentService.INTENT_BACKUP_NAME,
-                      backups.get(position));
-                  getActivity().startService(service);
-                }).build().show();
-          });
+                new MaterialDialog.Builder(getActivity())
+                        .title(R.string.confirm_removing_backup)
+                        .content(backups.get(position) + "" + " (" + sizeString + ")")
+                        .positiveText(R.string.confirm)
+                        .onPositive((dialog12, which1) -> {
+                          Intent service = new Intent(getActivity(),
+                                  DataBackupIntentService.class);
+                          service.setAction(DataBackupIntentService.ACTION_DATA_DELETE);
+                          service.putExtra(DataBackupIntentService.INTENT_BACKUP_NAME,
+                                  backups.get(position));
+                          getActivity().startService(service);
+                        }).build().show();
+              });
 
       importDialog.show();
     }
@@ -663,22 +646,22 @@ public class SettingsFragment extends PreferenceFragmentCompat {
     });
 
     new MaterialAlertDialogBuilder(getContext())
-        .setTitle(R.string.data_export_message)
-        .setView(v)
-        .setPositiveButton(R.string.confirm, (dialog, which) -> {
-          ((OmniNotes) getActivity().getApplication()).getAnalyticsHelper().trackEvent(
-              AnalyticsHelper.CATEGORIES.SETTING, "settings_export_data");
-          String backupName = TextUtils.isEmpty(fileNameEditText.getText().toString()) ?
-              fileNameEditText.getHint().toString() : fileNameEditText.getText().toString();
-          BackupHelper.startBackupService(backupName);
-        }).show();
+            .setTitle(R.string.data_export_message)
+            .setView(v)
+            .setPositiveButton(R.string.confirm, (dialog, which) -> {
+              ((OmniNotes) getActivity().getApplication()).getAnalyticsHelper().trackEvent(
+                      AnalyticsHelper.CATEGORIES.SETTING, "settings_export_data");
+              String backupName = TextUtils.isEmpty(fileNameEditText.getText().toString()) ?
+                      fileNameEditText.getHint().toString() : fileNameEditText.getText().toString();
+              BackupHelper.startBackupService(backupName);
+            }).show();
   }
 
 
   @Override
   public void onStart() {
     ((OmniNotes) getActivity().getApplication()).getAnalyticsHelper()
-        .trackScreenView(getClass().getName());
+            .trackScreenView(getClass().getName());
     super.onStart();
   }
 

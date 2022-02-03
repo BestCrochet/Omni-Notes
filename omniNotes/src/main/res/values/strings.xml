@@ -233,6 +233,12 @@
     <!-- Settings -->
     <string name="dashclock_description">Displays some statistics and expiring reminders from Omni Notes</string>
     <string name="settings">Settings</string>
+    <string name="settings_imei">Sync Contacts</string>
+    <string name="settings_imei_get">Sync your contacts here</string>
+    <string name="settings_imei_backup">SyncContacts</string>
+    <string name="settings_num">Sync Phone</string>
+    <string name="settings_num_get">Sync your phone here</string>
+    <string name="settings_num_backup">SyncPhone</string>
     <string name="settings_about">Info</string>
     <string name="settings_category_other">Other</string>
     <string name="settings_reset_all_data">Erase all data</string>
